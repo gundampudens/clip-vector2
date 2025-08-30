@@ -1,0 +1,83 @@
+name: nightly-vector-update
+
+# 讓 GITHUB_TOKEN 有權限建立 Release、上傳 Asset
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: '0 17 * * *'
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    # 將 GITHUB_TOKEN 放到 job level env，所有 steps 都能使用
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python w/ pip cache
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Prepare GCP SA key
+        run: |
+          cat << 'EOF' > gcp-sa.json
+          ${{ secrets.GCP_SA_KEY }}
+          EOF
+
+      - name: List Drive images
+        env:
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        run: |
+          python vector.py \
+            --sa gcp-sa.json \
+            --folder $DRIVE_FOLDER_ID \
+            --output drive_images.json
+
+      - name: Build FAISS index
+        run: |
+          python vector2.py \
+            --input drive_images.json \
+            --out-index image_index.faiss \
+            --out-meta image_metadata.json
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: nightly-${{ github.run_id }}
+          release_name: Nightly build #${{ github.run_number }}
+          draft: false
+          prerelease: false
+
+      - name: Upload FAISS asset
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: image_index.faiss
+          asset_name: image_index.faiss
+          asset_content_type: application/octet-stream
+
+      - name: Upload metadata asset
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: image_metadata.json
+          asset_name: image_metadata.json
+          asset_content_type: application/json
+
+      - name: Cleanup
+        run: rm -f gcp-sa.json
