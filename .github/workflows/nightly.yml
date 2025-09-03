@@ -4,10 +4,7 @@ name: nightly-vector-update
 permissions:
   contents: write
 
-on:
-  schedule:
-    - cron: '0 19 * * *'
-  workflow_dispatch:
+on:{}
 
 jobs:
   build-and-release:
